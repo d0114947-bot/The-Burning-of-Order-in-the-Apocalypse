@@ -4815,6 +4815,15 @@ function offParity(data, n) {
   if (!ks.some(function (k) { return (data.options[k].fx || {}).items; }) && Math.random() < 0.3) {
     var gk = posKs().concat(ks.filter(function (k) { return data.options[k].mood === "貪婪"; })); if (gk.length) { var gg = offPick(gk); fx(gg).items = { gain: [offPick(OFF_ITEMS.loot)] }; }
   }
+  // 6. 擊殺喪屍 → 由系統結算透明晶核／有色晶核掉落（與 AI 版的 fx.kills 相同）
+  if (/喪屍|屍|感染者|變異|怪物|異形/.test(data.narration || "")) {
+    ks.forEach(function (k) { var o = data.options[k]; if ((o.icon === "fist" || ["勇敢", "憤怒", "衝動"].indexOf(o.mood) >= 0) && Math.random() < 0.65) fx(k).kills = 1 + Math.floor(Math.random() * (late ? 3 : 2)); });
+  }
+  // 7. 有人盯上你的透明晶核（約一成多的關卡）
+  if (typeof itemCount === "function" && itemCount(CRYSTAL) > 0 && Math.random() < 0.13) {
+    var tk = negKs(); data.narration += "\n" + offPick(["有人的視線一直落在你鼓起的背包上，你很清楚，他在意的是裡面那幾顆透明晶核。", "一個陌生人湊過來，壓低聲音問：「聽說你身上有透明晶核？開個價吧。」"]);
+    if (tk.length) { var xk = offPick(tk), f2 = fx(xk); f2.items = f2.items || {}; f2.items.lose = (f2.items.lose || []).concat([CRYSTAL]); data.options[xk].after += "對方趁亂摸走了你一顆透明晶核。"; }
+  }
   if ((!data.facts || !data.facts.length) && Math.random() < 0.35) data.facts = [offPick([{ icon: "warning", label: "情況不明" }, { icon: "clock", label: "時間緊迫" }, { icon: "eye", label: "有人在看" }])];
 }
 var _offRaw1 = offChapterRaw;
