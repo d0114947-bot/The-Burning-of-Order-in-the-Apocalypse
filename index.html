@@ -2600,7 +2600,9 @@ function offLink(p, n) {
   if (hum && p.morale <= 4) pool = pool.concat(OFF_LINK.low, OFF_LINK.low);
   if (hum && p.morale >= 8) pool = pool.concat(OFF_LINK.high, OFF_LINK.high);
   if (p.dead && p.dead.length && Math.random() < 0.5) pool = pool.concat(OFF_LINK.dead, OFF_LINK.dead, OFF_LINK.dead).map(function (s) { return s.replace(/\{D\}/g, p.dead[p.dead.length - 1].name); });
-  return offPick(pool.filter(function (s) { return s.indexOf("{D}") < 0; }));
+  pool = pool.filter(function (s) { return s.indexOf("{D}") < 0; });
+  if (!hum) pool = pool.filter(function (s) { return !/隊伍|每個人|大家|同伴|隊友|沒有人說|沒有人再|沒有人提|沒有人想|沒有人催|彼此|你們/.test(s); });
+  return offPick(pool);
 }
 function offAnimal(av) { return av === "cat" || av === "dog" || av === "mutant"; }
 function offSub(s, v) { return s.replace(/\{A\}/g, v.A || "").replace(/\{B\}/g, v.B || "").replace(/\{o\}/g, v.o || "").replace(/\{N\}/g, v.N || ""); }
@@ -2610,10 +2612,10 @@ function offOptions(kit, row, late, vars, hasMates, ev) {
   var best = null, tries, letters = ["A", "B", "C", "D"], i, cands;
   function variantsFor(i) {
     if (late) {
-      var set = (OFF_P2 && OFF_P2[kit.c]) || null; return set ? set[i % set.length] : [["先觀察一下", "你按兵不動，把局面看清楚。", "冷靜"]];
+      var set = (OFF_P2 && OFF_P2[kit.c]) || null; return set ? (hasMates ? set[i % set.length] : offSoloVariants(set[i % set.length])) : [["先觀察一下", "你按兵不動，把局面看清楚。", "冷靜"]];
     }
     var ab = row[i], tbl = OFF_ACT[ab] || OFF_ACT["凡人"], v = tbl[kit.c] || tbl.gate;
-    return v;
+    return hasMates ? v : offSoloVariants(v);
   }
   var fallbackDistinct = null, fallbackAny = null;
   for (tries = 0; tries < 160; tries++) {
@@ -2656,11 +2658,11 @@ function offChapterRaw(n, retry) {
   var ev = (st.events && st.events[n - 1]) || null, late = n > TOTAL, cat = ev ? ev.cat : (late ? "異能者相遇" : "廢墟探索");
   var p = partyAt(n), hum = (p.members || []).filter(function (m) { return !offAnimal(m.av); }), ani = (p.members || []).filter(function (m) { return m.av === "cat" || m.av === "dog"; });
   var kit = !retry && ev && (late ? OFF_P2KITS[ev.seed] : OFF_KITS[ev.seed]);
-  if (kit && !hum.length && kit.cat === "同伴危機") kit = null;
+  if (kit && !hum.length && offNoSolo(kit)) kit = null;
   if (st.safe && st.safe.n === n && st.offKitAt && st.offKitAt[n]) kit = OFF_KITS[st.offKitAt[n]] || OFF_P2KITS[st.offKitAt[n]] || null;
   if (!kit) {
     var pool = late ? ((!retry && OFF_P2KITS.__cat && OFF_P2KITS.__cat[cat]) || OFF_P2KITS.__all || []) : ((!retry && OFF_CATKITS[cat]) || Object.keys(OFF_KITS).map(function (k) { return OFF_KITS[k]; }));
-    if (!hum.length) { pool = pool.filter(function (k) { return k.cat !== "同伴危機"; }); if (!pool.length) pool = (late ? OFF_P2KITS.__all : Object.keys(OFF_KITS).map(function (k) { return OFF_KITS[k]; })).filter(function (k) { return k.cat !== "同伴危機"; }); }
+    if (!hum.length) { pool = pool.filter(function (k) { return !offNoSolo(k); }); if (!pool.length) pool = (late ? OFF_P2KITS.__all : Object.keys(OFF_KITS).map(function (k) { return OFF_KITS[k]; })).filter(function (k) { return !offNoSolo(k); }); }
     st.offUsedKits = st.offUsedKits || {};
     var fresh = pool.filter(function (k) { return !st.offUsedKits[k.s]; });
     kit = offPick(fresh.length ? fresh : pool);
@@ -2672,6 +2674,7 @@ function offChapterRaw(n, retry) {
   if (kit.np) { var q = kit.np.split(":"); npName = q[0]; npAv = q[1] || "man"; }
   var vars = { A: a ? a.name : "", B: b ? b.name : "", N: npName, AN: a ? a.name : "" };
   vars.o = offSub(kit.o.indexOf("|") >= 0 ? kit.o.split("|")[a ? 0 : 1] : kit.o, vars);
+  if (!a && vars.o === "大家") vars.o = "眾人";
   var parts = [], body = 0;
   if (n > 1 && Math.random() < 0.6) parts.push(offLink(p, n));
   if (typeof offAmb === "function" && Math.random() < 0.5) { var amb = offAmb(kit.sc); if (amb) parts.push(amb); }
@@ -2680,7 +2683,7 @@ function offChapterRaw(n, retry) {
     if (pre === "~") { if (!a) return; t = t.slice(1); } else if (pre === "!") { if (a) return; t = t.slice(1); }
     if (/\{B\}/.test(t) && !b) return;
     if (/\{A\}/.test(t) && !a) return;
-    parts.push(offSub(t, vars)); body++;
+    var tt = offSub(t, vars); if (!a && OFF_PERSON.indexOf(kit.s) >= 0) tt = personRw(tt); parts.push(tt); body++;
   });
   if (!body) { if ((retry || 0) < 12) return offChapterRaw(n, (retry || 0) + 1); throw { code: "invalid_json", message: "離線關卡缺少內容" }; }
   var talk = [], cast = {};
@@ -6867,6 +6870,67 @@ function errBox(e, retry, extra) {
 function abColor(id) { return groupObj(groupOf(id)).c; }
 function abName(id, full) { return h("span", { class: "abn", style: { color: abColor(id) } }, full ? fullName(id) : id); }
 function abNames(ids, sep, full) { var out = []; ids.forEach(function (id, i) { if (i) out.push(sep || "＋"); out.push(abName(id, full)); }); return out; }
+
+/*OFFSOLO-START*/
+// ===== 一人獨行：沒有同伴時，劇情、選項與所有顯示的文字都要成立 =====
+var OFF_NOSOLO = ["最後兩罐食物，卻有三個人", "有人偷偷多拿了一份口糧", "隊裡有人開始囤食物", "糧食只夠一半的人撐到終點", "水只夠一個人走完全程", "你發現隊友撒了一個謊", "隊友為了救你，丟掉了所有的藥", "大家漸漸懷疑，叛徒是你最信任的人", "每個人都夢見了同一個地方", "每個人都聽見了同一首歌，卻找不到聲音的來源", "賭徒要拿你的同伴當賭注", "一場沙暴中，有人偷偷跟著你們的足跡", "一場沒有盡頭的濃霧吞掉了方向", "物資清單上少了一行", "領隊的信被截獲了"];
+var OFF_PERSON = ["零下三十度的夜，燃料只夠一小時", "熱浪來襲，水壺只剩最後一口", "營火快滅了，木柴只剩三根", "所有的鐘錶同時停了", "雨裡有一種奇怪的甜味", "一場大火從背後燒過來，有人故意放的", "水源被污染，乾淨的只剩半壺"];
+function offNoSolo(k) { return !!k && (k.cat === "同伴危機" || OFF_NOSOLO.indexOf(k.s) >= 0); }
+var OFF_GRP_RX = /大家|同伴|隊友|夥伴|隊伍|我們|你們|彼此|所有人|每個人|一起|身後的人|大夥|身旁的人|眾人|隊裡/;
+// 目前是否一人獨行：測試時可用 window.__SOLO 強制
+function isSoloNow() {
+  try {
+    if (window.__SOLO) return true;
+    if (typeof st === "undefined" || !st || !st.phase) return false;
+    var n = (typeof UI !== "undefined" && UI && UI.n) || 1, L = (st.chapters || []).length;
+    var p = partyAt(Math.min(n, L + 1));
+    return !!p && !(p.members || []).length;
+  } catch (e) { return false; }
+}
+var SOLO_TRIG = /你們|大家|同伴|隊伍|隊友|夥伴|一起|彼此|你倆|大夥/;
+function soloRw(s) {
+  if (typeof s !== "string" || !SOLO_TRIG.test(s)) return s;
+  s = s
+    .replace(/身後傳來輕輕的腳步聲，同伴們?沒有說話，只是靜靜地站到了你的旁邊。/g, "身後什麼聲音也沒有，只有風，靜靜地站在你旁邊。")
+    .replace(/你把外套拉緊，往同伴身邊靠了靠。/g, "你把外套拉緊，縮起肩膀。")
+    .replace(/同伴的鼾聲，讓你覺得稍微安心了一點。/g, "四周安靜得過分，連自己的呼吸聲都聽得見。");
+  return s
+    .replace(/[；;]?凡人請配合具異能(?:夥伴|同伴|隊友)們?的行動/g, "")
+    .replace(/你(?:與|和)(?:倖存的|剩下的)?(?:夥伴|同伴|隊友)們?/g, "你")
+    .replace(/隊伍(?=總算|的氣氛|的士氣|很|已經|才)/g, "你")
+    .replace(/你們(?:這支)?隊伍/g, "你")
+    .replace(/你和(?:你的)?(?:同伴們?|隊友們?|夥伴們?|大家)/g, "你")
+    .replace(/你們[兩三四五兩]個人?/g, "你")
+    .replace(/你(?:們|倆)/g, "你")
+    .replace(/(?:帶著|帶領|領著|牽著|拉著|護著|帶|領)大家/g, "")
+    .replace(/(?:替|為|幫)大家/g, "")
+    .replace(/(?:把|將)大家/g, "把自己")
+    .replace(/讓大家/g, "讓自己")
+    .replace(/(?:對|向)大家/g, "對自己")
+    .replace(/大家(?:都|全都|全部|同時)/g, "你")
+    .replace(/大家/g, "你")
+    .replace(/(?<![的我他她牠它們])(?:同伴|隊友|夥伴)(?=在|把|從|走|帶|找|拿|低|抬|翻|點)/g, "你")
+    .replace(/(?:同伴|隊友|夥伴)們(?=沒有|都|也)/g, "身邊的人")
+    .replace(/隊伍裡/g, "你身邊")
+    .replace(/你一起/g, "你")
+    .replace(/你你/g, "你");
+}
+function personRw(s) { return typeof s === "string" ? s.replace(/每個人(?:都|的)?/g, function (m) { return m.length > 3 ? "你的" : "你"; }).replace(/所有人(?:都)?/g, "你") : s; }
+// 顯示時統一處理：所有經由 add()／T() 產生的文字節點
+(function () {
+  var _add = add, _T = T;
+  add = function (e, kids) {
+    if (kids != null && typeof kids !== "object" && kids !== false && SOLO_TRIG.test(String(kids)) && isSoloNow()) kids = soloRw(String(kids));
+    return _add(e, kids);
+  };
+  T = function (s) { return _T(typeof s === "string" && SOLO_TRIG.test(s) && isSoloNow() ? soloRw(s) : s); };
+})();
+// 選項語料：獨行時先過濾掉提到同伴的寫法
+function offSoloVariants(v) {
+  var f = v.filter(function (c) { return !OFF_GRP_RX.test(c[0]) && !OFF_GRP_RX.test(c[1]); });
+  return f.length ? f : v;
+}
+/*OFFSOLO-END*/
 
 /*EVTEXT-START*/
 // 事件小標籤與救援事件的固定內容（不呼叫 AI）。每種各 10 則：[敘述, 你的反應, 台詞]
@@ -11415,7 +11479,7 @@ function baseChain(n) {
   var ch = st.chapters[n - 1], b = st.bases && st.bases[n]; if (!b) return false;
   var p = ch.after, hum = humansOf(p).length, awak = !!(st.pow && !isMortalPow()), rk = st.pow ? st.pow.rank : 1, r = Math.random();
   var pw = awak ? Math.min(0.7, 0.3 + 0.08 * rk) : 0.25, pc = awak ? 0.2 : 0.3, tone = b.force || (r < pw ? "w" : r < pw + pc ? "c" : "n"), used = st.baseUsed = st.baseUsed || [];
-  function pool(kind, f) { var o = []; BASE_T.forEach(function (t, i) { if (t.kind === kind && t.need <= hum && used.indexOf(i) < 0 && (!f || f(t))) o.push(i); }); return o; }
+  function pool(kind, f) { var o = []; BASE_T.forEach(function (t, i) { if (t.kind === kind && t.need <= hum && used.indexOf(i) < 0 && (hum || !/大家|同伴|隊友|夥伴/.test(JSON.stringify(t))) && (!f || f(t))) o.push(i); }); return o; }
   var ent = pool("enter", function (t) { return t.cond.charAt(0) === tone && t.cond.charAt(1) === (awak ? "a" : "x"); });
   if (!ent.length) ent = pool("enter", function (t) { return t.cond.charAt(1) === (awak ? "a" : "x"); });
   var stay = shuf(pool("stay")).slice(0, 2), lv = pool("leave"); if (!lv.length) lv = BASE_T.map(function (t, i) { return t.kind === "leave" ? i : -1; }).filter(function (x) { return x >= 0; });
@@ -11464,7 +11528,7 @@ function pickMourn(n) {
 }
 function mournLife(n, m) {
   var ch = st.chapters[n - 1], hum = humansOf(ch.after).length, key = m.fate + m.type, pool = [];
-  function collect(k) { MOURN_T.forEach(function (t, i) { if (t.cond === k && t.need <= hum) pool.push(i); }); }
+  function collect(k) { MOURN_T.forEach(function (t, i) { if (t.cond === k && t.need <= hum && (hum || !/大家|同伴|隊友|夥伴/.test(JSON.stringify(t)))) pool.push(i); }); }
   collect(key); if (!pool.length) collect("l" + m.type); if (!pool.length) collect("lh"); if (!pool.length) collect("bh");
   var t = MOURN_T[rnd(pool)], life = lifeBuild(t, n, null, { D: m.name, p: pronounOf(m.av) });
   life.tag = "緬懷・" + m.name; life.mournName = m.name; return life;
@@ -11926,6 +11990,7 @@ function comfortOf(p) {
   for (k in LIFE_GROUPS) { var hit = LIFE_GROUPS[k].filter(function (n) { return c[n]; }); if (hit.length) { score++; got.push(hit[0]); } }
   var line = "";
   if (score >= 2) line = "夜裡，大家用" + got.slice(0, 3).join("、") + "把這個落腳處整理得像樣了一點。有人洗了臉，有人換上乾淨的襪子，連說話的聲音，都比平常溫和。";
+  if (line && !((p && p.members) || []).length) line = line.replace("有人洗了臉，有人換上乾淨的襪子，連說話的聲音，都比平常溫和", "你洗了臉，換上乾淨的襪子，連呼吸都比平常安穩");
   return { score: score, line: line, got: got };
 }
 var FIND_ST = [
@@ -11973,7 +12038,7 @@ function doFind(n, next, want) {
   var pool = FIND_ST.filter(function (s) { return s[0] === "g" || s[0] === kind; });
   if (kind === "p" || kind === "s") pool = pool.filter(function (s) { return s[0] === kind || Math.random() < 0.35; });
   if (!pool.length) pool = FIND_ST.filter(function (s) { return s[0] === "g"; });
-  var story = pool[Math.floor(Math.random() * pool.length)], p = UI.party || partyAt(n + 1), hold = holdersOf(p);
+  var p = UI.party || partyAt(n + 1), hold = holdersOf(p); if (!hold.length) { var pp = pool.filter(function (s) { return !/同行的人|同伴|你們|大家|隊友/.test(s[2]); }); if (pp.length) pool = pp; } var story = pool[Math.floor(Math.random() * pool.length)];
   var toMate = hold.length && Math.random() < (cat === "life" ? 0.65 : 0.25), pe = toMate ? hold[Math.floor(Math.random() * hold.length)] : null, where;
   if (pe && giveMemberItem(pe, name)) where = "放進了" + pe.name + "的背包。";
   else { var before = itemCount(name), tot = (st.items || []).length; addItem(name, itemDescOf(name), null); where = itemCount(name) > before || (st.items || []).length > tot ? "放進了你的背包。" : "背包已經滿了，你只好把它留在原地。"; }
@@ -13316,6 +13381,11 @@ var BIG_REACT = [
   ["你蹲下來，把每一個人的背包、鞋帶、水壺都重新檢查了一遍。\n動作很慢，但每個人都看得出你的意思：不管來的是什麼，我們都已經準備好了。", "檢查裝備"],
   ["你一個人走上高處，望向黑暗的盡頭。\n身後傳來輕輕的腳步聲，同伴們沒有說話，只是靜靜地站到了你的旁邊。", "獨自守望"]
 ];
+var BIG_REACT_SOLO = [
+  ["你把背包重新綁緊，一個人坐在火堆旁，對著黑暗輕輕說：「今晚也一樣，撐過去就好。」\n緊繃的肩膀慢慢放鬆，你深吸了一口氣。", "穩住自己"],
+  ["你蹲下來，把自己的背包、鞋帶、水壺一件件重新檢查了一遍。\n動作很慢，但每一個步驟，都像在對自己說：不管來的是什麼，我都已經準備好了。", "檢查裝備"],
+  ["你一個人走上高處，望向黑暗的盡頭。\n風從遠方吹來，身後沒有任何人，只有你自己的影子，站得很直。", "獨自守望"]
+];
 // 全螢幕黑幕：先蓋住畫面、播完文字，再換頁（cb），最後淡出，讓底下的頁面從頭開始浮現
 function bigCurtain(opt, cb) {
   var my = epoch, F = !!window.__EVFAST, T = function (ms) { return F ? 20 : ms; }, lines = opt.lines || [], d = 0.7, last = 0, kids = [];
@@ -13362,7 +13432,7 @@ function bigOpen(n, kind, cb) {
       rows.push(h("div", { class: "line", style: { "--tint": pe.tint } }, [personAv(pe.name, pe.av, pe.tint), h("div", { class: "bub" }, [h("div", { class: "who" }, pe.name), h("p", null, say)])]));
     });
     var sb = crSB(T.omen[Math.floor(Math.random() * T.omen.length)]), talk = rows.length ? h("div", { class: "talk" }, rows) : null;
-    var tail = h("div"), picks = BIG_REACT.map(function (r) { return { t: r[1], on: function () { pick(r); } }; });
+    var tail = h("div"), humN = ms.filter(function (m) { return !isAnimal(m.av); }).length, picks = (humN ? BIG_REACT : BIG_REACT_SOLO).map(function (r) { return { t: r[1], on: function () { pick(r); } }; });
     var hero = heroOpts(picks), done = false;
     function pick(r) {
       if (done || my !== epoch) return; done = true; hero.style.pointerEvents = "none"; hero.style.opacity = ".35";
@@ -13982,6 +14052,17 @@ buildEnding2Prompt = function (st_, info) { var s = _bE2(st_, info); try { retur
 var _bEp = buildEpiloguePrompt;
 buildEpiloguePrompt = function (st_, ctx) { var s = _bEp(st_, ctx); try { return s + "\n\n" + choiceHighlights(); } catch (e) { return s; } };
 /*ENDCHOICE-END*/
+
+/*OFFSOLO2-START*/
+// 打字機顯示的文字（休閒關、事件、危機結果等）也一併處理
+(function () {
+  var _tp = typeP;
+  typeP = function (p, text, stop, ms) {
+    if (typeof text === "string" && SOLO_TRIG.test(text) && isSoloNow()) text = soloRw(text);
+    return _tp(p, text, stop, ms);
+  };
+})();
+/*OFFSOLO2-END*/
 
 app = document.getElementById("app");
 document.body.insertBefore(h("div", { id: "bgfx", "aria-hidden": "true" }), app);
