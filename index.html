@@ -4740,6 +4740,87 @@ function epilogueAsk(ctx) {
 }
 /*OFFEPI-END*/
 
+/*OFFPARITY-START*/
+// 離線版補齊：讓內建關卡也能像 AI 版一樣跳出傳聞、新人加入、受傷／死亡、關係變化、失物等事件與彈窗
+var OFF_JNAMES = ["阿森", "小葵", "老周", "陳姐", "小武", "阿芸", "莫叔", "唐唐", "阿凱", "許婆", "江川", "雅雯", "石頭", "小蔓", "賴哥", "阿澈", "老喬", "小綠", "吳嬸", "阿勳", "朵朵", "胡哥", "白露", "阿昊"];
+var OFF_JTRAIT = "樂觀、開朗、外向、內向、害羞、易怒、溫和、溫柔、慵懶、冷靜、嘴硬、愛哭、多疑、固執、幽默、務實".split("、");
+var OFF_RUMOR_M = [
+  "休息的時候，{A}壓低聲音說，他聽路過的人提起，有人似乎擁有異能，一個人就能剷除感染者，甚至對付變異生物。{B}皺起眉頭：「真的假的？」{A}聳聳肩：「誰知道，但是有人信。」",
+  "營火旁，{A}忽然說：「我聽說，有人手一伸就能讓喪屍倒下。」{B}笑了一聲，又很快收起笑容：「要是真的……我們也許不用這麼辛苦。」沒有人再接話，只有火星啪地炸了一下。",
+  "{A}翻著撿來的舊報紙，念到一半停了下來：「這上面寫，有人被目擊『徒手擋住了屍群』。」{B}搖頭：「大概是謠言。」{A}卻小聲說：「可是，我想去看看。」"
+];
+var OFF_RUMOR_S = [
+  "你在廢棄的商店裡翻到一台老收音機，雜訊裡斷斷續續傳出一句話：有人似乎擁有異能，能剷除感染者和變異生物。是真是假，你不知道，卻忍不住多聽了一會兒。",
+  "牆上有人用噴漆寫了一行字：「有人醒了，有力量的人醒了。」你盯著它看了很久，不確定這是希望，還是絕望的人留下的幻想。"
+];
+var OFF_SHEL_M = [
+  "同行的人湊在一起談起一個傳聞：某處有避難所正在建立。{A}說得很篤定，{B}則半信半疑。所有人的目光慢慢轉向你：「你說呢？我們要不要去？」",
+  "{A}翻出一張皺巴巴的手繪地圖：「聽說往那個方向，有人在蓋基地。」{B}沒有說話，只是看著你。大家都在等你點頭。"
+];
+var OFF_SHEL_S = [
+  "路邊的牆上貼著一張被雨水泡爛的告示：「前方有避難所，歡迎倖存者。」不知道是真的，還是陷阱。你一個人站在告示前，不知道該不該相信。",
+  "你遇到一個背著大包的路人，他說得很篤定：某處有避難所，有牆、有水、有守衛。他問你要不要一起走。你猶豫了。"
+];
+var OFF_HURT_L = ["{X}的手臂被劃開一道口子，血止不住地往外流。", "{X}被東西撞中了側腹，臉色一下子白了，只是咬著牙不吭聲。", "{X}的腿被壓傷了，每走一步都在發抖。"];
+function offHumNames() { var p = partyAt(st.__offN || 1); return (p.members || []).filter(function (m) { return !offAnimal(m.av) && m.av !== "robot" && !m.forever; }); }
+function offParity(data, n) {
+  if (!data || !data.options) return;
+  var late = n > TOTAL, p = partyAt(n), hum = (p.members || []).filter(function (m) { return !offAnimal(m.av) && m.av !== "robot"; }), ks = ["A", "B", "C", "D"].filter(function (k) { return data.options[k]; });
+  var hint = (st.hints || {})[n], mates = offShuf(hum), A = mates[0] ? mates[0].name : "", B = mates[1] ? mates[1].name : "";
+  function fx(k) { var o = data.options[k]; o.fx = o.fx || {}; return o.fx; }
+  function posKs() { return ks.filter(function (k) { return OFF_POS.indexOf(data.options[k].mood) >= 0 && !(data.options[k].fx || {}).join; }); }
+  function negKs() { return ks.filter(function (k) { return OFF_NEG.indexOf(data.options[k].mood) >= 0; }); }
+  function sub(t) { return t.replace(/\{A\}/g, A).replace(/\{B\}/g, B || A); }
+  // 1. 傳聞：與 AI 版相同的第 3~9 關傳聞
+  if (!late && hint === "rumor") {
+    if (A && (B || mates.length)) { data.narration += "\n" + sub(offPick(OFF_RUMOR_M)); if (B) data.talk = (data.talk || []).concat([{ who: A, av: mates[0].av, say: "有人說，真的有人擁有異能，你們信嗎？" }, { who: B, av: mates[1].av, say: "要是真的……我倒想親眼看看。" }]); }
+    else data.narration += "\n" + offPick(OFF_RUMOR_S);
+  }
+  if (!late && hint === "shelter") {
+    if (A) data.narration += "\n" + sub(offPick(OFF_SHEL_M)); else data.narration += "\n" + offPick(OFF_SHEL_S);
+    var weak = hum.filter(function (m) { var pe = st.people[m.name]; return pe && !m.forever && (pe.aff || 5) <= 6; }), ng = negKs();
+    if (weak.length && ng.length && Math.random() < 0.7) { var w = offPick(weak), nk = offPick(ng); fx(nk).leave = w.name; data.options[nk].after += w.name + "沒有說話，把背包重新背好，朝避難所的方向走了。"; }
+  }
+  // 2. 後期：有人受傷或死亡（機率隨階數上升，與 AI 版一致）
+  if (late && hum.length) {
+    var r = rankOf(n), pr = [0, 0, 0.15, 0.25, 0.35, 0.45][r] * 0.7;
+    if (Math.random() < pr) {
+      var vs = hum.filter(function (m) { return !m.forever; });
+      if (vs.length) {
+        var v = offPick(vs), risk = ks.filter(function (k) { return data.options[k].risky; }); if (!risk.length) risk = negKs(); if (!risk.length) risk = ks;
+        var dk = offPick(risk); data.narration += "\n" + offPick(OFF_HURT_L).replace(/\{X\}/g, v.name);
+        if (Math.random() < 0.55) { fx(dk).die = v.name; data.options[dk].after += v.name + "沒能撐過這一關。"; }
+      }
+    }
+  }
+  // 3. 一般性新人加入（沒有專屬加入者的關卡也偶爾會遇到新夥伴）
+  var hasJoin = ks.some(function (k) { return (data.options[k].fx || {}).join; });
+  if (!hasJoin && (p.members || []).length < 7 && Math.random() < (late ? 0.12 : 0.14)) {
+    var taken = Object.keys(st.people || {}), nm = offShuf(OFF_JNAMES).filter(function (x) { return taken.indexOf(x) < 0; })[0], pk = posKs().filter(function (k) { return !(data.options[k].fx || {}).items; });
+    if (nm && pk.length) {
+      var jk = offPick(pk), av = offPick(AV_KEYS_NPC.filter(function (a) { return a !== "robot" && a !== "cat" && a !== "dog" && a !== "mutant"; }));
+      fx(jk).join = { name: nm, av: av, trait: offPick(OFF_JTRAIT) }; data.options[jk].after += "一個叫「" + nm + "」的倖存者一路看在眼裡，主動說想跟著你們走。";
+    }
+  }
+  // 4. 同伴之間的關係變化
+  if (hum.length >= 2 && Math.random() < 0.3) {
+    var rk = offPick(ks), pos = OFF_POS.indexOf(data.options[rk].mood) >= 0, a1 = mates[0].name, b1 = mates[1].name;
+    fx(rk).rel = [{ a: a1, b: b1, d: pos ? 1 : -1 }];
+    data.options[rk].after += pos ? a1 + "和" + b1 + "之間的氣氛，好像熱絡了一些。" : a1 + "和" + b1 + "互看了一眼，誰也沒再開口，氣氛有點僵。";
+  }
+  // 5. 慌亂中掉了東西 / 多一點拾獲
+  var inv = (st.items || []).filter(function (x) { return !/晶核/.test(x.name); });
+  var fk = negKs().filter(function (k) { return ["恐懼", "猶豫", "衝動"].indexOf(data.options[k].mood) >= 0 && !(data.options[k].fx || {}).items; });
+  if (inv.length && fk.length && Math.random() < 0.3) { var lk = offPick(fk), li = offPick(inv); fx(lk).items = { lose: [li.name] }; data.options[lk].after += "慌亂之中，「" + li.name + "」掉在了路上，來不及撿。"; }
+  if (!ks.some(function (k) { return (data.options[k].fx || {}).items; }) && Math.random() < 0.3) {
+    var gk = posKs().concat(ks.filter(function (k) { return data.options[k].mood === "貪婪"; })); if (gk.length) { var gg = offPick(gk); fx(gg).items = { gain: [offPick(OFF_ITEMS.loot)] }; }
+  }
+  if ((!data.facts || !data.facts.length) && Math.random() < 0.35) data.facts = [offPick([{ icon: "warning", label: "情況不明" }, { icon: "clock", label: "時間緊迫" }, { icon: "eye", label: "有人在看" }])];
+}
+var _offRaw1 = offChapterRaw;
+offChapterRaw = function (n, retry) { var d = _offRaw1(n, retry); try { offParity(d, n); } catch (e) {} return d; };
+/*OFFPARITY-END*/
+
 // 背包物品：固定 36 種，不由 AI 自由命名（AI 只能從這份清單挑；沒對上的會自動歸到最接近的一種）
 var ITEM_BANK = [
   ["罐頭", "高熱量的軍用罐頭", "food", "罐|肉醬|沙丁"], ["礦泉水", "一瓶乾淨的水", "food", "水|飲|可樂|果汁|牛奶|茶|咖啡"], ["餅乾", "壓縮餅乾，耐放", "food", "餅|零食|薯片"], ["泡麵", "不用煮也能吃", "food", "麵"],
@@ -9111,6 +9192,16 @@ function crSoloText(bi, c) { var t = SOLO[bi][c.id]; return t || crPick(GSOLO[bi
 function crResText(g, c) { return c.res ? c.res[g] : RESULT[g][c.id]; }
 function crSense(ab, bi) { var s = SENSE[ab]; return crPick((s || SENSE["火"])[bi]); }
 function crFill(t, o) { return String(t).replace(/\{(\w+)\}/g, function (m, k) { return o[k] != null ? o[k] : m; }); }
+function crModeAny(p) { return crMode(p) || "plain"; }
+var PLAIN_ORDER = [["豁出去，正面硬闖", 0.10, 0.45], ["穩住陣腳，固守不動", 0.12, 0.50], ["放下負擔，想辦法脫身", 0.10, 0.50], ["翻翻身上的東西，就地應急", 0.10, 0.50]];
+var PLAIN_TXT = [
+  ["你把心一橫，頂著{OBS}直接衝了過去。沒有異能，沒有取巧，只有一口氣和一雙腿，能不能{GOAL}，全看這一把。", "沒有任何力量能借，你乾脆不再多想，低著頭、咬著牙，朝{OBS}硬闖過去。"],
+  ["你找了個相對穩的位置蹲下，先把呼吸壓平，再一點一點觀察{OBS}的動靜，等到最好的空檔才動手。這一步慢，但穩。", "你沒有急著往前，而是把身邊能用來擋、能用來墊的東西全部擺好，守住腳下的每一寸，等{OBS}自己露出破綻。"],
+  ["你把背上最沉的東西放下，只留最要緊的。身體輕了，腦袋也清楚了，你繞開{OBS}，往另一個方向找出路。", "你退後一步，重新看了一遍四周，決定不跟{OBS}硬碰。繞遠路，總比把命丟在這裡好。"],
+  ["你把身上能用的東西一件一件翻出來，繩子、碎布、空罐、石塊……拼拼湊湊，居然也湊出一個能擋一下{OBS}的辦法。", "你蹲下來把背包倒空，挑出幾樣最有用的，臨時綁在一起。看起來很寒酸，但眼前，這就是你唯一的工具。"]
+];
+var PLAIN_INTRO = ["{WHY}，眼前卻是{OBS}，而你的目標是{GOAL}。這一次沒有異能可以倚靠，只能靠判斷、體力和手邊的東西。你要怎麼做？", "{WHY}。{OBS}還擋在前面，退不是辦法，只能想別的路——靠自己的腦袋和雙手。"];
+function crWhy() { var pw = st.pow; if (!pw || !(pw.max > 0)) return "你的力量還沒有真正覺醒"; if (!unlockedSkills().length) return "你還沒有學會任何能用的技能"; if (pw.energy <= 0) return "能量已經見底，背包裡又沒有任何透明晶核"; return "身邊沒有能出手的夥伴，你自己的力量也已經用不上"; }
 function crMates(p) { return p.members.filter(function (m) { return m.ability && m.ability !== "凡人" && SENSE[m.ability]; }); }
 function crMode(p) {
   if (st.pow && st.pow.max > 0 && unlockedSkills().length) return "player";
@@ -9146,7 +9237,7 @@ function talkEls(q) {
 }
 function crisisPage(n, ch, done, opt) {
   opt = opt || {}; ENV_N = n;
-  var p = ch.after || UI.party, mode = opt.mode || crMode(p), my = epoch;
+  var p = ch.after || UI.party, mode = opt.mode || crModeAny(p), my = epoch;
   if (!mode) return done();
   var rk = n > TOTAL ? rankOf(n) : 1;
   var c = opt.id ? CRISES.filter(function (x) { return x.id === opt.id; })[0] : crPick(crPool(n));
@@ -9183,7 +9274,14 @@ function crisisPage(n, ch, done, opt) {
     if (skipT) story(); else typeP(tp, title, stop, 140).then(function () { setTimeout(story, 1100); });
   }
   // ---------- 玩家選技能 ----------
+  function powLeft() { var pw = st.pow; if (!pw || !(pw.max > 0)) return false; if (itemCount(CRYSTAL) > 0) return true; if (pw.energy <= 0) return false; var cs = unlockedSkills().map(function (x) { return x.cost * envMult(n); }); return !cs.length || pw.energy >= Math.min.apply(null, cs); }
+  function plainPage() {
+    var wrap = heroOpts(PLAIN_ORDER.map(function (o, oi) { return { t: o[0], on: function () { resolve([], oi, 0); } }; }));
+    paint([crSB(crFill(crPick(PLAIN_INTRO), { WHY: crWhy(), OBS: c.obs, GOAL: c.goal })), wrap]);
+  }
   function treePage() {
+    var noPow = !powLeft();
+    if (noPow && !(typeof begTarget === "function" && begTarget())) { mode = "plain"; return plainPage(); }
     var all = crAvail(unlockedSkills(), n), pw = st.pow, mult = envMult(n);
     var glow = {}; CR_N.forEach(function (b) { if (rec[CR_L[b]]) all.filter(function (x) { return x.branch === b; }).sort(function (a, b2) { return b2.rank - a.rank; }).slice(0, 2).forEach(function (x) { glow[x.name] = 1; }); });
     var recs = all.filter(function (x) { return glow[x.name]; }).sort(function (a, b2) { return b2.rank - a.rank; });
@@ -9192,7 +9290,8 @@ function crisisPage(n, ch, done, opt) {
       function go() { if (my !== epoch) return; pw.energy = Math.max(0, pw.energy - need); if (UI.refresh) UI.refresh(); resolve(sel.slice(), null, need); if (window.__EVFAST) pw.energy = pw.max; }
       if (pw.energy >= need) go(); else ensureEnergy(need, go, reset);
     } });
-    paint([pk]);
+    var alt = noPow ? [h("p", { class: "story crp crlead" }, "能量見底了。可以向同伴開口要晶核，也可以不靠異能，換個方式撐過去："), h("div", { class: "actions center" }, PLAIN_ORDER.map(function (o, oi) { return h("button", { type: "button", class: "go", onclick: function () { mode = "plain"; resolve([], oi, 0); } }, o[0]); }))] : [];
+    paint([pk].concat(alt));
   }
   // ---------- 觀戰 ----------
   function specPage() {
@@ -9242,6 +9341,7 @@ function crisisPage(n, ch, done, opt) {
     if (mode === "spec" && casts.length === 2) { var cb2 = crCombo(letters[0], letters[1], c); if (cb2) items.push({ k: "p", text: crFill(cb2, { OBS: c.obs, GOAL: c.goal }), map: { A: casts[0].sk.name, B: casts[1].sk.name } }); }
     if (mode === "spec" && !letters.length) letters.push(CR_L[CR_N[order]]);
     var g = crGradeOf(c, letters, mode === "spec" ? Math.max(maxRank, rk) : maxRank, rk);
+    if (mode === "plain") { var po = PLAIN_ORDER[order], pr = Math.random(), pb2 = po[1] + (order === 3 && (st.items || []).filter(function (x) { return !isCrystal(x.name); }).length ? 0.15 : 0); g = pr < pb2 ? 0 : pr < pb2 + po[2] ? 1 : 2; items.push({ k: "p", text: crFill(crPick(PLAIN_TXT[order]), { OBS: c.obs, GOAL: c.goal }) }); }
     if (mode === "endure") { var eo = ENDURE_ORDER[order], rr = Math.random(); g = rr < eo[1] ? 0 : rr < eo[2] + eo[1] ? 1 : 2; items.push({ k: "p", text: crFill(crPick(ENDURE_TXT[order]), { ENV: envOf(n).short }) }); }
     if (mode === "player" && casts.length) {
       var mc = casts.filter(function (x) { return letters.some(function (l) { return crIsRecPair(c, l, CR_L[CR_N[x.b]]); }); })[0];
@@ -9267,7 +9367,7 @@ function crisisPage(n, ch, done, opt) {
     }
     (st.crisisLog = st.crisisLog || []).push({ id: c.id, title: c.title, g: g, n: n }); st.crisisLast = n;
     var els = items.map(crEl), story = h("div", { class: "crstory talk" }, els);
-    var info = { g: g, c: c, text: crResText(g, c), after: AFTER[g], spec: mode === "spec", skills: ps.map(function (x) { return x.name; }) };
+    var info = { g: g, c: c, text: crResText(g, c), after: AFTER[g], spec: mode === "spec", plain: mode === "plain" || mode === "endure", skills: ps.map(function (x) { return x.name; }) };
     var btn = h("button", { type: "button", class: "go", onclick: function () { if (my === epoch) done(info); } }, "繼續");
     var gained = {}, gl = [];
     ch.events.slice(ev0).forEach(function (e) { if (e.t === "item" && e.v === "gain") gained[e.name] = (gained[e.name] || 0) + 1; });
@@ -9289,7 +9389,7 @@ function crisisPage(n, ch, done, opt) {
     var wrap = heroOpts(ENDURE_ORDER.map(function (o, oi) { return { t: o[0], on: function () { resolve([], oi, 0); } }; }));
     paint([crSB(crFill(crPick(ENDURE_INTRO), { WHY: why, ENVN: e.short })), wrap]);
   }
-  if (mode === "player") treePage(); else if (mode === "endure") endurePage(); else specPage();
+  if (mode === "player") treePage(); else if (mode === "endure") endurePage(); else if (mode === "plain") plainPage(); else specPage();
 }
 function crisisPrompt(n) {
   var e = (st.crisisLog || []).filter(function (x) { return x.n === n - 1; })[0];
@@ -9304,7 +9404,7 @@ function crisisPlanned(n) {
   if ((typeof envOf === "function" && envOf(n)) || (typeof isFall === "function" && (isFall(n) || isMut(n)))) return false;
   st.crisisPlan = st.crisisPlan || {};
   if (st.crisisPlan[n] !== undefined) return !!st.crisisPlan[n];
-  var on = n > TOTAL && n < LAST() && window.__CRISIS !== 0 && (window.__CRISIS > 0 ? n % Math.round(1 / window.__CRISIS) === 0 : (!window.__EVFAST && Math.random() < crisisChance(n))) && (ENV_N = n, !!crMode(partyAt(n)));
+  var on = n > TOTAL && n < LAST() && window.__CRISIS !== 0 && (window.__CRISIS > 0 ? n % Math.round(1 / window.__CRISIS) === 0 : (!window.__EVFAST && Math.random() < crisisChance(n))) && (ENV_N = n, !!crModeAny(partyAt(n)));
   st.crisisPlan[n] = on ? 1 : 0;
   return on;
 }
@@ -9320,7 +9420,7 @@ function crisisChapter(n) {
   crisisPage(n, ch, function (info) {
     if (my !== epoch) return;
     var o = ch.q.opts.A;
-    o.act = "在「" + c.title + "」中" + (info.spec ? "指揮同伴應對" : "施展異能" + (info.skills.length ? "（" + info.skills.join("、") + "）" : "") + "應對") + "，結果是「" + GRADE_NAME[info.g] + "」";
+    o.act = "在「" + c.title + "」中" + (info.plain ? "不靠異能，憑判斷與雙手應對" : info.spec ? "指揮同伴應對" : "施展異能" + (info.skills.length ? "（" + info.skills.join("、") + "）" : "") + "應對") + "，結果是「" + GRADE_NAME[info.g] + "」";
     o.text = "危機化解了：" + GRADE_NAME[info.g] + "。"; o.after = info.after; ch.ans = "A";
     UI.recent = o.act + "。" + o.after; UI.canAct = false; UI.party = ch.after;
     afterChoice(n, ch, function () {
@@ -9350,7 +9450,7 @@ function survChapter(n) {
     crisisPage(n, ch, function (info) {
       if (my !== epoch) return;
       var o = ch.q.opts.A || (ch.q.opts.A = { kind: "act", mood: "勇敢", icon: "fist" });
-      o.fx = {}; o.act = "在" + envOf(n).short + "中" + (info.spec ? "指揮同伴應對" : "施展異能" + (info.skills.length ? "（" + info.skills.join("、") + "）" : "") + "應對") + "，結果是「" + GRADE_NAME[info.g] + "」";
+      o.fx = {}; o.act = "在" + envOf(n).short + "中" + (info.plain ? "不靠異能，憑判斷與雙手應對" : info.spec ? "指揮同伴應對" : "施展異能" + (info.skills.length ? "（" + info.skills.join("、") + "）" : "") + "應對") + "，結果是「" + GRADE_NAME[info.g] + "」";
       o.text = "生存危機：" + GRADE_NAME[info.g] + "。"; o.after = info.after; ch.ans = "A";
       UI.recent = o.act + "。" + o.after; UI.canAct = false; UI.party = ch.after;
       afterChoice(n, ch, function () {
@@ -10553,7 +10653,7 @@ function loadChapter(n) {
   if (isMut(n)) { st.pending = null; return mutChapter(n); }
   if (isEcho(n)) { st.pending = null; return echoChapter(n); }
   if (n > TOTAL && envOf(n) && envCrisisRoll(n)) return survChapter(n);
-  if (n > TOTAL && crisisPlanned(n)) { ENV_N = n; if (crMode(partyAt(n))) { st.pending = null; return crisisChapter(n); } st.crisisPlan[n] = 0; }
+  if (n > TOTAL && crisisPlanned(n)) { ENV_N = n; if (crModeAny(partyAt(n))) { st.pending = null; return crisisChapter(n); } st.crisisPlan[n] = 0; }
   if (intentRoll(n)) { st.pending = null; return intentPage(n, function () { st.pending = null; loadChapter(n); }); }
   var pr = (st.pending && st.pending.n === n) ? st.pending.p : (st.pending = { n: n, p: fetchChapter(n) }).p;
   var lb = loadingBlock(n, n === 1 ? "旅程即將開始…" : "前方的路正在展開…");
@@ -14087,7 +14187,9 @@ initSample();
     if (window.__evtm) window.__evtm.toggle(on);
   } }, "♪ 音樂：開");
   document.body.appendChild(btn);
-  function play() { if (hold) return; if (!SETS[rank] || !SETS[rank].length) return; var p = audio.play(); if (p && p.then) p.then(function () { started = true; unbind(); }, function () {}); }
+  var fadeNext = false;
+  function fadeIn(ms) { var tk = ++fadeTk, t0 = Date.now(); audio.volume = 0; (function step() { if (tk !== fadeTk) return; var k = Math.min(1, (Date.now() - t0) / (ms || 2800)); audio.volume = 0.45 * k; if (k < 1) setTimeout(step, 50); })(); }
+  function play() { if (hold) return; if (!SETS[rank] || !SETS[rank].length) return; if (fadeNext && audio.paused && on) { fadeNext = false; fadeIn(2800); } var p = audio.play(); if (p && p.then) p.then(function () { started = true; unbind(); }, function () {}); }
   function next() { if (!SETS[rank] || !SETS[rank].length) return; pos++; if (pos >= order.length) shuffle(); load(); if (on) play(); }
   function switchTo() {
     if (!SETS[rank].length) { order = []; audio.pause(); return; }
@@ -14104,7 +14206,7 @@ initSample();
       var k = Math.min(1, (Date.now() - t0) / D);
       audio.volume = Math.max(0, v0 * (1 - k));
       if (k < 1) { setTimeout(step, 50); return; }
-      audio.pause(); switchTo(); audio.volume = 0.45;
+      audio.pause(); audio.volume = 0.45; fadeNext = true; switchTo();
     })();
   }
   var fadeTk = 0;
@@ -14126,7 +14228,7 @@ initSample();
   function first() { if (on && !started) play(); }
   function unbind() { ["pointerdown", "keydown", "touchstart"].forEach(function (t) { document.removeEventListener(t, first, true); }); }
   ["pointerdown", "keydown", "touchstart"].forEach(function (t) { document.addEventListener(t, first, true); });
-  window.__music = { isOn: function () { return on; }, started: function () { return started; }, hold: function (v) { hold = !!v; if (hold) { ++fadeTk; audio.pause(); audio.volume = 0.45; } else if (on && started && SETS[rank] && SETS[rank].length) { audio.volume = 0; play(); var tk = ++fadeTk, t0 = Date.now(); (function step() { if (tk !== fadeTk) return; var k = Math.min(1, (Date.now() - t0) / 2800); audio.volume = 0.45 * k; if (k < 1) setTimeout(step, 50); })(); } }, audio: audio, fadeOut: fadeOut, setRank: setRank, rank: function () { return rank; }, sets: SETS };
+  window.__music = { isOn: function () { return on; }, started: function () { return started; }, hold: function (v) { hold = !!v; if (hold) { ++fadeTk; audio.pause(); audio.volume = 0.45; fadeNext = false; } else { fadeNext = true; if (on && started && SETS[rank] && SETS[rank].length) play(); } }, audio: audio, fadeOut: fadeOut, setRank: setRank, rank: function () { return rank; }, sets: SETS };
   setRank(0); play();
 })();
 showHome();
