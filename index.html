@@ -11147,6 +11147,8 @@ function renderOpening() {
     if (opened) return; opened = true;
     nextRow.appendChild(h("div", { class: "tapnext opennext", role: "button", tabindex: "0", onclick: finish, onkeydown: function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); finish(); } } }, "點一下繼續"));
     seqIn([nextRow], 0, 0.2);
+    // 停留幾秒讓玩家讀完序章後，自動進入第一關（按鈕仍可提早點）
+    setTimeout(function () { if (my === epoch) finish(); }, 7000);
   }
   // 序章主圖：依起點與性別使用提供的圖片；沒有圖片的地點先用內建場景
   var okey = PLACE_KEY[st.opening.place], osrc = typeof OPEN_IMG !== "undefined" ? (OPEN_IMG[okey + "_" + st.gender] || OPEN_IMG[okey]) : null, hero;
